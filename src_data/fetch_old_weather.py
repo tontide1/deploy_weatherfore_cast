@@ -3,6 +3,8 @@ import os
 import requests
 from datetime import date, timedelta, datetime
 
+print((datetime.now()))
+
 
 provinces = [
     {"name": "An Giang", "lat": 10.521, "lon": 105.125},
@@ -266,6 +268,7 @@ try:
     )
     connection.commit()
     print(f"✅ Đã chèn {len(all_rows)} dòng vào PostgreSQL")
+    
 except Exception as e:
     print(f"❌ Lỗi khi ghi vào PostgreSQL: {e}")
 
