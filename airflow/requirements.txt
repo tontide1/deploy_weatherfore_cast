@@ -1,0 +1,8 @@
+requests==2.31.0
+python-dotenv==1.0.0
+python-decouple==3.8
+psycopg2-binary==2.9.9
+pandas==2.2.3
+numpy==1.25.2
+apache-airflow-providers-postgres==5.6.1
+scikit-learn==1.6.1

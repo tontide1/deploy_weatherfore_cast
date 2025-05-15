@@ -1,0 +1,111 @@
+#!/bin/bash
+
+# Exit on any error
+set -e
+
+echo "=== CHECK PYTHON VERSION ==="
+if ! python --version 2>&1 | grep -q "Python 3"; then
+    echo "ERROR: Python3 is required!"
+    exit 1
+fi
+echo "=== PYTHON VERSION CHECKED ==="
+
+echo "=== LOAD ENVIRONMENT VARIABLES ==="
+if [ -f .env ]; then
+    export $(grep -v '^#' .env | grep -E '^[A-Za-z_][A-Za-z0-9_]*=.*$' | sed 's/[[:space:]]*$//' | xargs)
+else
+    echo "WARNING: .env file not found, relying on Docker environment variables"
+fi
+echo "=== LOAD ENVIRONMENT VARIABLES COMPLETELY ==="
+
+# Create necessary directories for Airflow data
+# mkdir -p /weather_data
+
+echo "=== WAIT FOR DATABASE ==="
+until pg_isready -h $DATABASE_HOST -p $DATABASE_PORT -U $DATABASE_USER; do
+    echo "Database is not ready yet, waiting..."
+    sleep 2
+done
+echo "=== DATABASE IS AVAILABLE ==="
+
+echo "=== CONNECT TO DATABASE ==="
+export PGPASSWORD="$DATABASE_PASSWORD"
+psql -h "$DATABASE_HOST" -U "$DATABASE_USER" -p "$DATABASE_PORT" -c "SELECT 1;" >/dev/null 2>&1
+if [ $? -ne 0 ]; then
+    echo "ERROR: Cannot connect to PostgreSQL!"
+    echo "Check PostgreSQL server and sign-in information!"
+    exit 1
+fi
+echo "=== DATABASE IS READY ==="
+
+# echo "=== CREATE DATABASE ==="
+# psql -h "$DATABASE_HOST" -U "$DATABASE_USER" -p "$DATABASE_PORT" -c "DROP DATABASE IF EXISTS $DATABASE_NAME;"
+# psql -h "$DATABASE_HOST" -U "$DATABASE_USER" -p "$DATABASE_PORT" -c "CREATE DATABASE $DATABASE_NAME WITH ENCODING='UTF8' TEMPLATE=template0;"
+# echo "=== CREATE DATABASE COMPLETELY ==="
+
+echo "UPDATE METADATA OF DATABASE"
+psql -h "$DATABASE_HOST" -U "$DATABASE_USER" -p "$DATABASE_PORT" -c "ALTER DATABASE $DATABASE_NAME REFRESH COLLATION VERSION;"
+echo "=== UPDATE METADATA OF DATABASE COMPLETELY ==="
+
+echo "=== CREATE VIRTUAL ENVIRONMENT ==="
+python -m venv venv || { echo "❌ Failed to create venv"; exit 1; }
+if [ -f "venv/bin/activate" ]; then
+    source venv/bin/activate
+    if [ -f "requirements.txt" ]; then
+        pip install --upgrade pip
+        pip install wheel setuptools
+        echo "📦 Installing dependencies from requirements.txt..."
+        pip install --upgrade pip
+        pip install -r requirements.txt || { echo "❌ Failed to install requirements."; exit 1; }
+    else
+        echo "⚠️  requirements.txt not found. Skipping dependency installation."
+    fi
+else
+    echo "❌ Activate script not found! venv creation may have failed."
+    exit 1
+fi
+echo "=== VIRTUAL ENVIRONMENT ACTIVATED ==="
+
+if [ ! -d src ]; then
+    echo "ERROR: src directory not found!"
+    exit 1
+fi
+
+echo "=== INSERT HISTORICAL DATA INTO DB ==="
+python src_data/fetch_old_weather.py
+echo "=== INSERT HISTORICAL DATA INTO DB COMPLETELY ==="
+
+echo "=== FORECAST FUTURE WEATHER ==="
+python test_model/randomforest_model.py
+echo "=== INSERT FORECAST WEATHER INTO DB COMPLETELY ==="
+
+echo "=== NAVIGATE TO PROJECT DIRECTORY ==="
+cd /app/src
+
+echo "=== CREATE STATIC & MEDIA DIRECTORIES IF NOT EXIST ==="
+mkdir -p static media
+
+echo "=== COLLECT STATIC FILES ==="
+python manage.py collectstatic --noinput
+
+echo "=== CREATE MIGRATIONS ==="
+find /app/src/*/migrations/ -type f -name "*.py" ! -name "__init__.py" -exec rm -f {} +
+python manage.py makemigrations
+if [ $? -ne 0 ]; then
+    echo "ERROR: Cannot create migrations"
+    exit 1
+fi
+python manage.py migrate
+if [ $? -ne 0 ]; then
+    echo "ERROR: Cannot apply migrations"
+    echo "Check PostgreSQL connection"
+    exit 1
+fi
+echo "=== CREATE MIGRATIONS COMPLETELY ==="
+
+# echo "=== CREATE ADMIN ACCOUNT ==="
+# python manage.py shell -c "from django.contrib.auth import get_user_model; User = get_user_model(); User.objects.create_superuser("$admin_username", "$admin_email", "$admin_password") if not User.objects.filter(username='$admin_username').exists() else print('Admin already exists!!!')"
+# echo "=== CREATE ADMIN ACCOUNT COMPLETELY ==="
+
+echo "=== RUN SERVER ==="
+exec "$@"
