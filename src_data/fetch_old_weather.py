@@ -180,10 +180,10 @@ try:
     
     table_name = os.environ.get("WEATHER_DATA_TABLE_NAME", default="weather_data")
     # Xóa bảng nếu đã tồn tại
-    # cursor.execute(f"""
-    #     DROP TABLE IF EXISTS {table_name};
-    # """)
-    # connection.commit()
+    cursor.execute(f"""
+        DROP TABLE IF EXISTS {table_name};
+    """)
+    connection.commit()
     # Tạo bảng mới
     cursor.execute(
         f"""
